@@ -2,6 +2,38 @@
 
 All notable changes to Twenty CRM LinkedIn Capture Extension.
 
+## [1.1.0] - 2026-06-25
+
+### Changed
+
+- Authentication now uses a Twenty API key entered in the popup, instead of the
+  session cookie. The key is stored in the browser's local extension storage.
+- Requests send credentials so deployments behind an authenticating reverse
+  proxy pass the gateway; this is a no-op for instances without one.
+- Connection test now probes the `people` query rather than a removed root field.
+
+### Added
+
+- Schema-tolerant writes: input fields the target Twenty schema does not accept
+  are dropped automatically, and the location field is resolved by introspection
+  (scalar `city`/`location` or an ADDRESS composite, with country detection).
+- Resilient LinkedIn scraping using structural anchors (page heading, contact
+  row, company entity, labelled photo) that tolerate UI/class changes.
+
+### Fixed
+
+- Capture and update against current Twenty schema and the redesigned LinkedIn DOM.
+- Search panel no longer flickers while typing.
+
+### Removed
+
+- Profile photo upload via the GraphQL multipart mutation, which is no longer
+  available; the photo URL is captured instead.
+
+### Maintenance
+
+- Updated dependencies (WXT, Vue, TypeScript) and refreshed documentation.
+
 ## [1.0.0] - 2024-12-17
 
 ### ✨ Features

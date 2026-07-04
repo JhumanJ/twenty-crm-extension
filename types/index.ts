@@ -56,17 +56,6 @@ export type TwentyCompany = {
   idealCustomerProfile?: boolean;
 };
 
-export type TwentyTokenPair = {
-  accessOrWorkspaceAgnosticToken: {
-    token: string;
-    expiresAt: string;
-  };
-  refreshToken: {
-    token: string;
-    expiresAt: string;
-  };
-};
-
 // Extension State Types
 export type CaptureStatus = 
   | 'idle'
@@ -114,6 +103,7 @@ export type ExtensionResponse<T = unknown> = {
 // Settings
 export type ExtensionSettings = {
   twentyUrl: string;
+  apiKey: string;
 };
 
 // GraphQL Response Types

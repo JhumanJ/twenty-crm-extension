@@ -346,10 +346,13 @@ export default defineContentScript({
     let searchResults: SearchResult[] = [];
     let isSearching = false;
     let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-    
+
     // DOM elements
     let container: HTMLDivElement | null = null;
     let styleEl: HTMLStyleElement | null = null;
+    // Live reference to the search results list, so search updates can patch it
+    // in place instead of rebuilding (and re-animating) the whole panel.
+    let searchResultsEl: HTMLDivElement | null = null;
     
     // Initialize
     function init() {
@@ -367,7 +370,7 @@ export default defineContentScript({
       render();
       
       // Check for existing record after a short delay
-      setTimeout(checkExisting, 1500);
+      setTimeout(checkExisting, 2500);
     }
     
     // Check for existing record
@@ -495,24 +498,61 @@ export default defineContentScript({
       }
     }
     
+    // Escape untrusted text (CRM/LinkedIn data) before inserting via innerHTML
+    function escapeHtml(s: string): string {
+      const div = document.createElement('div');
+      div.textContent = s;
+      return div.innerHTML;
+    }
+
+    // Patch only the results list. Rebuilding the whole panel on every keystroke
+    // replays the entrance animation (visible flicker) and steals input focus.
+    function populateSearchResults() {
+      const resultsDiv = searchResultsEl;
+      if (!resultsDiv) return;
+
+      // Only show the loading state on the first query (nothing to show yet).
+      // While refining a search, keep the current results visible to avoid a
+      // flash between "Searching..." and the new list on every keystroke.
+      if (isSearching && searchResults.length === 0) {
+        resultsDiv.innerHTML = '<div class="twenty-search-loading">Searching...</div>';
+      } else if (!isSearching && searchQuery && searchResults.length === 0) {
+        resultsDiv.innerHTML = '<div class="twenty-search-empty">No contacts found</div>';
+      } else if (searchResults.length > 0) {
+        resultsDiv.innerHTML = '';
+        searchResults.forEach((result) => {
+          const item = document.createElement('div');
+          item.className = 'twenty-search-result';
+          item.innerHTML = `
+            <div class="twenty-search-result-name">${escapeHtml(result.name)}</div>
+            ${result.subtitle ? `<div class="twenty-search-result-sub">${escapeHtml(result.subtitle)}</div>` : ''}
+          `;
+          item.addEventListener('click', () => linkToRecord(result));
+          resultsDiv.appendChild(item);
+        });
+      } else {
+        resultsDiv.innerHTML = '<div class="twenty-search-empty">Type to search...</div>';
+      }
+    }
+
     // Search CRM for contacts
     async function searchCRM(query: string) {
       if (!query.trim()) {
         searchResults = [];
-        render();
+        populateSearchResults();
         return;
       }
-      
+
       isSearching = true;
-      render();
-      
+      populateSearchResults();
+
       try {
         const pageType = getLinkedInPageType(window.location.href);
         const response = await browser.runtime.sendMessage({
           type: 'SEARCH_RECORDS',
           payload: { query, type: pageType },
         }) as ExtensionResponse<SearchResult[]>;
-        
+
         if (response.success && response.data) {
           searchResults = response.data;
         } else {
@@ -522,9 +562,9 @@ export default defineContentScript({
         console.error('Error searching:', error);
         searchResults = [];
       }
-      
+
       isSearching = false;
-      render();
+      populateSearchResults();
     }
     
     // Link to existing record and update it
@@ -716,7 +756,10 @@ export default defineContentScript({
     // Render function
     function render() {
       if (!container) return;
-      
+
+      // Any previous results node is about to be discarded; drop the stale ref.
+      searchResultsEl = null;
+
       const wrapper = document.createElement('div');
       wrapper.className = 'twenty-capture-container';
       
@@ -803,32 +846,15 @@ export default defineContentScript({
         inputWrap.appendChild(input);
         panel.appendChild(inputWrap);
         
-        // Results
+        // Results — built once here, then patched in place by populateSearchResults()
         const resultsDiv = document.createElement('div');
         resultsDiv.className = 'twenty-search-results';
-        
-        if (isSearching) {
-          resultsDiv.innerHTML = '<div class="twenty-search-loading">Searching...</div>';
-        } else if (searchQuery && searchResults.length === 0) {
-          resultsDiv.innerHTML = '<div class="twenty-search-empty">No contacts found</div>';
-        } else if (searchResults.length > 0) {
-          searchResults.forEach((result) => {
-            const item = document.createElement('div');
-            item.className = 'twenty-search-result';
-            item.innerHTML = `
-              <div class="twenty-search-result-name">${result.name}</div>
-              ${result.subtitle ? `<div class="twenty-search-result-sub">${result.subtitle}</div>` : ''}
-            `;
-            item.addEventListener('click', () => linkToRecord(result));
-            resultsDiv.appendChild(item);
-          });
-        } else {
-          resultsDiv.innerHTML = '<div class="twenty-search-empty">Type to search...</div>';
-        }
-        
         panel.appendChild(resultsDiv);
+        searchResultsEl = resultsDiv;
+        populateSearchResults();
+
         wrapper.appendChild(panel);
-        
+
         // Focus input after render
         setTimeout(() => input.focus(), 50);
       }
@@ -857,7 +883,7 @@ export default defineContentScript({
           showMenuDropdown = false;
           showSearchPanel = false;
           render();
-          setTimeout(checkExisting, 1500);
+          setTimeout(checkExisting, 2500);
         }
       }
     });

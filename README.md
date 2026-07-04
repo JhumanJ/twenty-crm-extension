@@ -1,168 +1,104 @@
 # Twenty CRM - LinkedIn Capture Extension
 
-A Chrome extension to capture LinkedIn profiles and companies directly into your self-hosted [Twenty CRM](https://twenty.com).
+A browser extension that captures LinkedIn profiles and companies into a self-hosted [Twenty CRM](https://twenty.com) instance. Built with [WXT](https://wxt.dev/) and Vue 3.
 
----
+## Features
 
-## 📥 Download & Install
+| Feature | Description |
+| --- | --- |
+| LinkedIn capture | One-click capture of LinkedIn profiles and companies into Twenty |
+| Company auto-create | Creates the contact's current company if it does not already exist |
+| Duplicate detection | Checks for an existing record by LinkedIn URL or name before creating |
+| Update existing | Refreshes an existing CRM record with the latest LinkedIn data |
+| Manual linking | Searches the CRM and links a LinkedIn profile to an existing record |
+| Resilient scraping | Extracts data using structural anchors that tolerate LinkedIn UI changes |
+| Schema-tolerant writes | Adapts to differences in the target Twenty schema across versions |
 
-### Quick Install (Recommended)
+## Installation
 
-1. **[⬇️ Download Latest Release](../../releases/latest)**
-2. Download the `twenty-crm-linkedin-extension-*-chrome.zip` file
-3. **Unzip** the file - you should see `manifest.json` and other files directly inside
-4. Open Chrome → `chrome://extensions`
-5. Enable **Developer mode** (toggle top right)
-6. Click **Load unpacked** → select the **unzipped folder** (the one containing `manifest.json`)
-7. Click the extension icon and enter your Twenty CRM URL
+1. Download the latest `*-chrome.zip` from the [Releases page](../../releases/latest).
+2. Unzip it. The folder should contain `manifest.json` at its root.
+3. Open `chrome://extensions` and enable **Developer mode** (top right).
+4. Click **Load unpacked** and select the unzipped folder.
 
-> **Note**: You must be logged into your Twenty CRM in the same browser for the extension to work.
->
-> **Tip**: After unzipping, verify the folder contains `manifest.json` at the root level, not inside a subfolder.
+For Firefox, load the `*-firefox.zip` build via `about:debugging`.
 
----
+## Configuration
 
-## ✨ Features
+1. In Twenty, open **Settings → Developers** and create an API key.
+2. Click the extension icon and enter:
+   - **Twenty URL** — the base URL of your instance (for example, `https://crm.example.com`).
+   - **API key** — the key created above.
+3. Click **Save**, then **Test Connection**. The status should read **Connected**.
 
-| Feature                    | Description                                                |
-| -------------------------- | ---------------------------------------------------------- |
-| 🔗 **LinkedIn Capture**    | One-click capture of LinkedIn profiles to your CRM         |
-| 🏢 **Company Auto-Create** | Automatically creates company records when adding contacts |
-| 📸 **Photo Upload**        | Uploads LinkedIn profile photos directly to Twenty storage |
-| 🔍 **Duplicate Detection** | Checks if contact/company exists by LinkedIn URL or name   |
-| 🔄 **Update Existing**     | Refresh CRM records with latest LinkedIn data              |
-| 🔎 **Manual Linking**      | Search and link LinkedIn profiles to existing CRM contacts |
-| 🌍 **Multi-language**      | Extracts company names in EN, FR, DE, ES headlines         |
+The API key is stored only in the browser's local extension storage and is sent
+as a bearer token with each request.
 
----
+If your Twenty instance sits behind an authenticating reverse proxy, keep a
+logged-in browser session to that domain so requests pass the gateway.
 
-## 🚀 Usage
+## Usage
 
-### Capturing a LinkedIn Profile
+### Profiles
 
-1. Visit any LinkedIn profile (`linkedin.com/in/username`)
-2. A button appears in the **bottom-left corner**:
-
-   | Button State       | Meaning                               |
-   | ------------------ | ------------------------------------- |
-   | **Add to Twenty**  | Profile not in CRM - click to add     |
-   | **Open in Twenty** | Profile exists - click to view in CRM |
-
-3. Click `•••` for more options:
-   - **Link to existing contact** - Search and link to existing record
-   - **Update from LinkedIn** - Refresh CRM with current LinkedIn data
-
-### Capturing a Company
-
-Same process - visit any LinkedIn company page (`linkedin.com/company/name`)
-
----
-
-## 📋 Data Captured
-
-### People
-
-- ✅ First name & Last name
-- ✅ Job title / headline
-- ✅ Profile photo (uploaded to Twenty)
-- ✅ Location
-- ✅ LinkedIn URL
-- ✅ Current company (auto-created if needed)
+1. Open any LinkedIn profile (`linkedin.com/in/...`).
+2. A button appears in the bottom-left corner:
+   - **Add to Twenty** — the profile is not yet in the CRM; click to create it.
+   - **Open in Twenty** — the profile already exists; click to view it.
+3. Use the `...` menu for more actions:
+   - **Link to existing contact** — search the CRM and link to an existing record.
+   - **Update from LinkedIn** — refresh the existing record with current data.
 
 ### Companies
 
-- ✅ Company name
-- ✅ LinkedIn URL
-- ✅ Website (when available)
-- ✅ Employee count
-- ✅ Company logo
+The same flow applies on any LinkedIn company page (`linkedin.com/company/...`).
 
----
+## Data captured
 
-## 🛠️ Build from Source
+**People:** first and last name, job title / headline, location, LinkedIn URL,
+current company (created automatically when needed), and profile photo URL.
+
+**Companies:** name, LinkedIn URL, website, and employee count when available.
+
+Optional fields are only sent when present, and the extension adapts to the
+fields the target Twenty schema actually exposes.
+
+## Build from source
 
 ```bash
-# Clone the repository
-git clone https://github.com/YOUR_USERNAME/twenty-crm-extension.git
+git clone https://github.com/pi3ch/twenty-crm-extension.git
 cd twenty-crm-extension
-
-# Install dependencies
 npm install
 
-# Development with hot reload
-npm run dev
-
-# Build for production
-npm run build
-
-# Create distributable ZIP
-npm run zip
+npm run dev      # development build with hot reload
+npm run build    # production build (output in .output/chrome-mv3/)
+npm run zip      # packaged distributable
 ```
 
-The built extension is in `.output/chrome-mv3/`
+## Troubleshooting
 
----
+| Issue | Suggestion |
+| --- | --- |
+| Connection test fails | Verify the Twenty URL and API key, and that the API key is active |
+| Button not appearing | Reload the LinkedIn page and confirm the extension is enabled |
+| A field is not captured | Open the page console; the scraper logs the values it extracts |
 
-## 🏷️ Creating a Release
+Debug logs:
 
-**Option 1: Git Tag**
+- **Page console** (F12): content-script and scraping logs.
+- **Service worker**: `chrome://extensions` → the extension's "Service worker" link, for API request logs.
 
-```bash
-git tag v1.0.0
-git push origin v1.0.0
-```
+## Tech stack
 
-**Option 2: Manual**
-
-1. Go to GitHub → Actions → "Build and Release Extension"
-2. Click "Run workflow"
-3. Enter version (e.g., `v1.0.0`)
-
-GitHub Actions will automatically build and create a release with the ZIP file.
-
----
-
-## 🔧 Requirements
-
-- Chrome or Chromium-based browser
-- Self-hosted Twenty CRM instance
-- Logged into Twenty CRM in the same browser
-
----
-
-## ❓ Troubleshooting
-
-| Issue                     | Solution                                                             |
-| ------------------------- | -------------------------------------------------------------------- |
-| "Failed to save settings" | Check your Twenty URL is correct and you're logged in                |
-| Button not appearing      | Refresh the LinkedIn page, check extension is enabled                |
-| Profile photo not showing | Check Twenty's file storage is configured                            |
-| Company not created       | Headline may not have recognizable pattern (`at/chez/@/bei` Company) |
-
-### Debug Logs
-
-- **Page console** (F12): Shows scraping logs
-- **Service Worker**: Go to `chrome://extensions` → click "Service Worker" under the extension
-
----
-
-## 📚 Tech Stack
-
-- [WXT](https://wxt.dev/) - Web Extension Framework
-- [Vue 3](https://vuejs.org/) - Popup UI
+- [WXT](https://wxt.dev/) — web extension framework
+- [Vue 3](https://vuejs.org/) — popup UI
 - TypeScript
 - Twenty CRM GraphQL API
 
----
+## Credits
 
-## 📄 License
+This project is a fork of [JhumanJ/twenty-crm-extension](https://github.com/JhumanJ/twenty-crm-extension). Thanks to the original author for the foundation this builds on.
+
+## License
 
 MIT
-
----
-
-## 🔗 Links
-
-- [Twenty CRM](https://twenty.com)
-- [WXT Documentation](https://wxt.dev)
-- [Report an Issue](../../issues)

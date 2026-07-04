@@ -1,5 +1,4 @@
 import type {
-  TwentyTokenPair,
   GraphQLResponse,
   PeopleQueryResult,
   CompaniesQueryResult,
@@ -8,6 +7,7 @@ import type {
   LinkedInProfileData,
   LinkedInCompanyData,
 } from '../types';
+import { isCountryName, canonicalCountry } from './countries';
 
 // GraphQL Queries - Using correct Links composite field structure
 // Links type has: primaryLinkUrl, primaryLinkLabel, secondaryLinks
@@ -192,6 +192,8 @@ const CREATE_COMPANY = `
 export class TwentyApiClient {
   private baseUrl: string;
   private token: string | null = null;
+  // Cache of writable field names per input type (from GraphQL introspection)
+  private inputFieldsCache = new Map<string, Set<string>>();
 
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl.replace(/\/$/, '');
@@ -199,100 +201,6 @@ export class TwentyApiClient {
 
   setToken(token: string) {
     this.token = token;
-  }
-
-  // Upload an image via GraphQL multipart upload
-  async uploadImageViaGraphQL(imageUrl: string, filename?: string): Promise<string | null> {
-    if (!this.token) {
-      console.error('[Twenty] No authentication token set for image upload');
-      return null;
-    }
-
-    console.log('[Twenty] Starting image upload from:', imageUrl);
-
-    try {
-      // Fetch the image
-      console.log('[Twenty] Fetching image...');
-      const response = await fetch(imageUrl);
-      if (!response.ok) {
-        console.error('[Twenty] Failed to fetch image:', response.status, response.statusText);
-        return null;
-      }
-
-      const blob = await response.blob();
-      console.log('[Twenty] Image fetched, size:', blob.size, 'type:', blob.type);
-      
-      const finalFilename = filename || `profile-${Date.now()}.jpg`;
-
-      // GraphQL multipart upload format (Apollo Upload spec)
-      // https://github.com/jaydenseric/graphql-multipart-request-spec
-      const operations = JSON.stringify({
-        query: `
-          mutation UploadImage($file: Upload!, $fileFolder: FileFolder) {
-            uploadImage(file: $file, fileFolder: $fileFolder) {
-              path
-              token
-            }
-          }
-        `,
-        variables: {
-          file: null,
-          fileFolder: 'PersonPicture',
-        },
-      });
-
-      const map = JSON.stringify({
-        '0': ['variables.file'],
-      });
-
-      const formData = new FormData();
-      formData.append('operations', operations);
-      formData.append('map', map);
-      formData.append('0', blob, finalFilename);
-
-      const uploadUrl = `${this.baseUrl}/graphql`;
-      console.log('[Twenty] Uploading via GraphQL to:', uploadUrl);
-      
-      const uploadResponse = await fetch(uploadUrl, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${this.token}`,
-        },
-        body: formData,
-      });
-
-      console.log('[Twenty] Upload response status:', uploadResponse.status);
-
-      if (!uploadResponse.ok) {
-        const errorText = await uploadResponse.text();
-        console.error('[Twenty] Failed to upload image:', uploadResponse.status, errorText);
-        return null;
-      }
-
-      const result = await uploadResponse.json();
-      console.log('[Twenty] Upload result:', result);
-      
-      if (result.errors?.length) {
-        console.error('[Twenty] GraphQL errors:', result.errors);
-        return null;
-      }
-
-      // Return just the path - Twenty stores paths, not full URLs with tokens
-      // The server will handle authentication when serving the image
-      const uploadData = result.data?.uploadImage;
-      if (uploadData?.path) {
-        // Store just the path - Twenty's frontend will request with fresh tokens
-        const avatarPath = uploadData.path;
-        console.log('[Twenty] Image uploaded successfully, path:', avatarPath);
-        return avatarPath;
-      }
-
-      console.warn('[Twenty] Upload succeeded but no path/token in response:', result);
-      return null;
-    } catch (error) {
-      console.error('[Twenty] Error uploading image:', error);
-      return null;
-    }
   }
 
   private async graphqlRequest<T>(
@@ -308,7 +216,14 @@ export class TwentyApiClient {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${this.token}`,
+        // Some self-hosted Twenty instances are exposed through an ngrok tunnel
+        // during development; without this header ngrok's free tier serves an
+        // interstitial HTML warning page instead of proxying the request.
+        'ngrok-skip-browser-warning': 'true',
       },
+      // Send cookies too, so deployments behind an authenticating reverse proxy
+      // still pass the gateway. Harmless when no such proxy is present.
+      credentials: 'include',
       body: JSON.stringify({ query, variables }),
     });
 
@@ -317,6 +232,75 @@ export class TwentyApiClient {
     }
 
     return response.json();
+  }
+
+  // Run a mutation whose variables contain an input object, and self-heal against
+  // schema drift: if Twenty rejects an input field it no longer has (e.g. a
+  // renamed/removed standard field), drop that field and retry. This keeps the
+  // extension working across Twenty releases without code changes.
+  private async graphqlMutate<T>(
+    query: string,
+    variables: Record<string, unknown>,
+    inputKey = 'input'
+  ): Promise<GraphQLResponse<T>> {
+    // Clone so we can safely prune fields between attempts
+    const vars = { ...variables, [inputKey]: { ...(variables[inputKey] as Record<string, unknown>) } };
+    const input = vars[inputKey] as Record<string, unknown>;
+
+    let result = await this.graphqlRequest<T>(query, vars);
+    let guard = 0;
+    while (guard++ < 8) {
+      const message = result.errors?.[0]?.message || '';
+      const match = message.match(/doesn'?t have any ["“]([^"”]+)["”] field/i);
+      if (!match || !(match[1] in input)) break;
+      console.warn(`[Twenty] Schema has no "${match[1]}" field — dropping it and retrying`);
+      delete input[match[1]];
+      result = await this.graphqlRequest<T>(query, vars);
+    }
+    return result;
+  }
+
+  // Introspect the writable field names of a GraphQL input type (cached).
+  private async getInputFields(typeName: string): Promise<Set<string>> {
+    const cached = this.inputFieldsCache.get(typeName);
+    if (cached) return cached;
+    let names = new Set<string>();
+    try {
+      const result = await this.graphqlRequest<{ __type: { inputFields: { name: string }[] | null } | null }>(
+        `query InputFields($n: String!) { __type(name: $n) { inputFields { name } } }`,
+        { n: typeName }
+      );
+      names = new Set((result.data?.__type?.inputFields || []).map((f) => f.name));
+    } catch (error) {
+      console.warn(`[Twenty] Could not introspect ${typeName}:`, error);
+    }
+    this.inputFieldsCache.set(typeName, names);
+    return names;
+  }
+
+  // Resolve where a location string should go on the given input type, and shape
+  // the value accordingly. Twenty has changed this over time, so we discover it:
+  // a scalar field (city/location/town) takes the raw string; an ADDRESS composite
+  // (e.g. a custom "address" field) takes parsed city/country subfields.
+  private async buildLocationInput(
+    typeName: string,
+    location: string
+  ): Promise<{ field: string; value: unknown } | null> {
+    const fields = await this.getInputFields(typeName);
+
+    const scalar = ['city', 'location', 'town'].find((f) => fields.has(f));
+    if (scalar) return { field: scalar, value: location };
+
+    // Otherwise look for an ADDRESS composite field (standard or custom),
+    // matching any field whose name looks address-like.
+    const addressField =
+      (fields.has('address') ? 'address' : null) ||
+      Array.from(fields).find((f) => /address/i.test(f));
+    if (addressField) return { field: addressField, value: parseLocationToAddress(location) };
+
+    if (fields.size === 0) return { field: 'city', value: location }; // introspection off; optimistic
+    console.warn(`[Twenty] No location/address field on ${typeName}. Available:`, Array.from(fields));
+    return null;
   }
 
   async findPersonByLinkedInUrl(
@@ -472,13 +456,9 @@ export class TwentyApiClient {
   private async createCompanySimple(
     name: string
   ): Promise<CreateCompanyResult['createCompany']> {
-    const result = await this.graphqlRequest<CreateCompanyResult>(
+    const result = await this.graphqlMutate<CreateCompanyResult>(
       CREATE_COMPANY,
-      {
-        input: {
-          name,
-        },
-      }
+      { input: { name } }
     );
 
     if (result.errors?.length) {
@@ -515,43 +495,31 @@ export class TwentyApiClient {
       console.log('[Twenty] No currentCompany in data, skipping company creation');
     }
 
-    // Try to upload profile image to Twenty storage
-    let avatarUrl = data.profileImageUrl || '';
-    if (data.profileImageUrl) {
-      console.log('[Twenty] Attempting to upload profile image...');
-      try {
-        const uploadedUrl = await this.uploadImageViaGraphQL(
-          data.profileImageUrl,
-          `${data.firstName}-${data.lastName}-profile.jpg`
-        );
-        if (uploadedUrl) {
-          avatarUrl = uploadedUrl;
-          console.log('[Twenty] Profile image uploaded, using:', avatarUrl);
-        } else {
-          console.log('[Twenty] Upload failed, using LinkedIn URL directly');
-        }
-      } catch (error) {
-        console.error('[Twenty] Error uploading profile image:', error);
-      }
-    }
+    // Link the LinkedIn photo URL directly. Twenty's old multipart uploadImage
+    // mutation no longer exists, and Person exposes an avatarUrl field.
+    const avatarUrl = data.profileImageUrl || '';
 
-    const result = await this.graphqlRequest<CreatePersonResult>(CREATE_PERSON, {
-      input: {
-        name: {
-          firstName: data.firstName,
-          lastName: data.lastName,
-        },
-        linkedinLink: {
-          primaryLinkUrl: data.linkedinUrl,
-          primaryLinkLabel: 'LinkedIn',
-        },
-        jobTitle: data.headline || '',
-        avatarUrl: avatarUrl,
-        city: data.location || '',
-        // Link to company if we found/created one
-        companyId: companyId,
+    // Only include optional fields that actually have a value — sending empty
+    // strings makes Twenty validate fields the page never filled in.
+    const input: Record<string, unknown> = {
+      name: {
+        firstName: data.firstName,
+        lastName: data.lastName,
       },
-    });
+      linkedinLink: {
+        primaryLinkUrl: data.linkedinUrl,
+        primaryLinkLabel: 'LinkedIn',
+      },
+    };
+    if (data.headline) input.jobTitle = data.headline;
+    if (avatarUrl) input.avatarUrl = avatarUrl;
+    if (data.location) {
+      const loc = await this.buildLocationInput('PersonCreateInput', data.location);
+      if (loc) input[loc.field] = loc.value;
+    }
+    if (companyId) input.companyId = companyId;
+
+    const result = await this.graphqlMutate<CreatePersonResult>(CREATE_PERSON, { input });
 
     if (result.errors?.length) {
       throw new Error(result.errors[0].message);
@@ -567,27 +535,22 @@ export class TwentyApiClient {
   async createCompany(
     data: LinkedInCompanyData
   ): Promise<CreateCompanyResult['createCompany']> {
-    const result = await this.graphqlRequest<CreateCompanyResult>(
-      CREATE_COMPANY,
-      {
-        input: {
-          name: data.name,
-          linkedinLink: {
-            primaryLinkUrl: data.linkedinUrl,
-            primaryLinkLabel: 'LinkedIn',
-          },
-          domainName: data.website
-            ? {
-                primaryLinkUrl: data.website,
-                primaryLinkLabel: 'Website',
-              }
-            : undefined,
-          employees: data.employeeCount
-            ? this.parseEmployeeCount(data.employeeCount)
-            : undefined,
-        },
-      }
-    );
+    const input: Record<string, unknown> = {
+      name: data.name,
+      linkedinLink: {
+        primaryLinkUrl: data.linkedinUrl,
+        primaryLinkLabel: 'LinkedIn',
+      },
+    };
+    if (data.website) {
+      input.domainName = { primaryLinkUrl: data.website, primaryLinkLabel: 'Website' };
+    }
+    if (data.employeeCount) {
+      const employees = this.parseEmployeeCount(data.employeeCount);
+      if (employees !== undefined) input.employees = employees;
+    }
+
+    const result = await this.graphqlMutate<CreateCompanyResult>(CREATE_COMPANY, { input });
 
     if (result.errors?.length) {
       throw new Error(result.errors[0].message);
@@ -602,11 +565,13 @@ export class TwentyApiClient {
 
   async testConnection(): Promise<boolean> {
     try {
-      // Simple query to test if the connection works
-      const result = await this.graphqlRequest<{ currentWorkspace: { id: string } }>(
-        `query { currentWorkspace { id } }`
+      // Probe a field the API-key (Core API) schema actually exposes. The
+      // frontend-only `currentWorkspace`/`currentUser` roots are not available
+      // here, but `people` is — and it's what the rest of the extension uses.
+      const result = await this.graphqlRequest<PeopleQueryResult>(
+        `query TestConnection { people(first: 1) { edges { node { id } } } }`
       );
-      return !result.errors?.length && !!result.data?.currentWorkspace;
+      return !result.errors?.length && Array.isArray(result.data?.people?.edges);
     } catch {
       return false;
     }
@@ -677,42 +642,30 @@ export class TwentyApiClient {
         }
       }
 
-      // Try to upload profile image to Twenty storage
-      let avatarUrl = personData.profileImageUrl || undefined;
-      if (personData.profileImageUrl) {
-        try {
-          const uploadedUrl = await this.uploadImageViaGraphQL(
-            personData.profileImageUrl,
-            `${personData.firstName}-${personData.lastName}-profile.jpg`
-          );
-          if (uploadedUrl) {
-            avatarUrl = uploadedUrl;
-            console.log('[Twenty] Profile image uploaded for update:', avatarUrl);
-          }
-        } catch (error) {
-          console.error('[Twenty] Error uploading profile image:', error);
-        }
-      }
+      // Link the LinkedIn photo URL directly (see createPerson).
+      const avatarUrl = personData.profileImageUrl || undefined;
 
-      const result = await this.graphqlRequest<{ updatePerson: { id: string } }>(
+      const input: Record<string, unknown> = {
+        name: {
+          firstName: personData.firstName,
+          lastName: personData.lastName,
+        },
+        linkedinLink: {
+          primaryLinkUrl: personData.linkedinUrl,
+          primaryLinkLabel: 'LinkedIn',
+        },
+      };
+      if (personData.headline) input.jobTitle = personData.headline;
+      if (avatarUrl) input.avatarUrl = avatarUrl;
+      if (personData.location) {
+        const loc = await this.buildLocationInput('PersonUpdateInput', personData.location);
+        if (loc) input[loc.field] = loc.value;
+      }
+      if (companyId) input.companyId = companyId;
+
+      const result = await this.graphqlMutate<{ updatePerson: { id: string } }>(
         UPDATE_PERSON,
-        {
-          id,
-          input: {
-            name: {
-              firstName: personData.firstName,
-              lastName: personData.lastName,
-            },
-            linkedinLink: {
-              primaryLinkUrl: personData.linkedinUrl,
-              primaryLinkLabel: 'LinkedIn',
-            },
-            jobTitle: personData.headline || undefined,
-            avatarUrl: avatarUrl,
-            city: personData.location || undefined,
-            companyId: companyId,
-          },
-        }
+        { id, input }
       );
 
       if (result.errors?.length) {
@@ -721,27 +674,24 @@ export class TwentyApiClient {
     } else if (type === 'company' && data.type === 'company') {
       const companyData = data as LinkedInCompanyData;
 
-      const result = await this.graphqlRequest<{ updateCompany: { id: string } }>(
+      const input: Record<string, unknown> = {
+        name: companyData.name,
+        linkedinLink: {
+          primaryLinkUrl: companyData.linkedinUrl,
+          primaryLinkLabel: 'LinkedIn',
+        },
+      };
+      if (companyData.website) {
+        input.domainName = { primaryLinkUrl: companyData.website, primaryLinkLabel: 'Website' };
+      }
+      if (companyData.employeeCount) {
+        const employees = this.parseEmployeeCount(companyData.employeeCount);
+        if (employees !== undefined) input.employees = employees;
+      }
+
+      const result = await this.graphqlMutate<{ updateCompany: { id: string } }>(
         UPDATE_COMPANY,
-        {
-          id,
-          input: {
-            name: companyData.name,
-            linkedinLink: {
-              primaryLinkUrl: companyData.linkedinUrl,
-              primaryLinkLabel: 'LinkedIn',
-            },
-            domainName: companyData.website
-              ? {
-                  primaryLinkUrl: companyData.website,
-                  primaryLinkLabel: 'Website',
-                }
-              : undefined,
-            employees: companyData.employeeCount
-              ? this.parseEmployeeCount(companyData.employeeCount)
-              : undefined,
-          },
-        }
+        { id, input }
       );
 
       if (result.errors?.length) {
@@ -766,14 +716,24 @@ export class TwentyApiClient {
   }
 }
 
-// Helper to extract token from Twenty's tokenPair cookie
-export function extractTokenFromCookie(
-  cookieValue: string
-): string | null {
-  try {
-    const tokenPair: TwentyTokenPair = JSON.parse(cookieValue);
-    return tokenPair.accessOrWorkspaceAgnosticToken?.token || null;
-  } catch {
-    return null;
+// Split a LinkedIn location string ("City, Region, Country") into Twenty ADDRESS
+// composite subfields. LinkedIn always puts the city first, so we take that
+// directly (no city list needed); the last segment is set as country only when
+// it matches a known country name. A lone token is classified as country if it's
+// a known country, otherwise treated as the city.
+function parseLocationToAddress(location: string): Record<string, string> {
+  const parts = location.split(',').map((s) => s.trim()).filter(Boolean);
+  const out: Record<string, string> = {};
+  if (parts.length === 0) return out;
+
+  if (parts.length === 1) {
+    if (isCountryName(parts[0])) out.addressCountry = canonicalCountry(parts[0]);
+    else out.addressCity = parts[0];
+    return out;
   }
+
+  out.addressCity = parts[0];
+  const last = parts[parts.length - 1];
+  if (isCountryName(last)) out.addressCountry = canonicalCountry(last);
+  return out;
 }

@@ -4,6 +4,7 @@ import type { ExtensionResponse } from '../../types';
 
 // State
 const twentyUrl = ref('');
+const apiKey = ref('');
 const hasToken = ref(false);
 const isConnected = ref(false);
 const isLoading = ref(true);
@@ -31,7 +32,7 @@ const connectionStatus = computed(() => {
 const statusText = computed(() => {
   switch (connectionStatus.value) {
     case 'not-configured': return 'Not configured';
-    case 'no-session': return 'Not logged in';
+    case 'no-session': return 'No API key';
     case 'connected': return 'Connected';
     case 'disconnected': return 'Connection failed';
     default: return 'Unknown';
@@ -94,7 +95,7 @@ async function saveSettings() {
     error.value = 'Please enter your Twenty URL';
     return;
   }
-  
+
   // Normalize URL
   let url = twentyUrl.value.trim();
   if (!url.startsWith('http://') && !url.startsWith('https://')) {
@@ -102,19 +103,27 @@ async function saveSettings() {
   }
   url = url.replace(/\/$/, ''); // Remove trailing slash
   twentyUrl.value = url;
-  
+
   isSaving.value = true;
   error.value = null;
   success.value = null;
-  
+
   try {
+    // Only send the API key when the user actually entered one, so re-saving
+    // the URL doesn't wipe a previously stored key.
+    const payload: { twentyUrl: string; apiKey?: string } = { twentyUrl: url };
+    if (apiKey.value.trim()) {
+      payload.apiKey = apiKey.value.trim();
+    }
+
     const response = await browser.runtime.sendMessage({
       type: 'SAVE_SETTINGS',
-      payload: { twentyUrl: url },
+      payload,
     }) as ExtensionResponse;
-    
+
     if (response.success) {
       success.value = 'Settings saved!';
+      apiKey.value = ''; // clear the input; the key is stored, never read back
       // Reload to check token
       await loadSettings();
     } else {
@@ -221,6 +230,20 @@ function formatDate(timestamp: number): string {
           <p class="hint">Your self-hosted Twenty instance URL</p>
         </div>
 
+        <div class="form-group">
+          <label class="label" for="apiKey">API Key</label>
+          <input
+            id="apiKey"
+            v-model="apiKey"
+            type="password"
+            class="input"
+            autocomplete="off"
+            :placeholder="hasToken ? '•••••••• (saved — type to replace)' : 'Paste your Twenty API key'"
+            @keyup.enter="saveSettings"
+          />
+          <p class="hint">Twenty → Settings → Developers → API keys</p>
+        </div>
+
         <div class="button-group">
           <button 
             class="btn btn--primary" 
@@ -247,10 +270,11 @@ function formatDate(timestamp: number): string {
         </div>
       </section>
 
-      <!-- Login Prompt -->
+      <!-- API key prompt -->
       <section v-if="isConfigured && !hasToken" class="section section--warning">
         <p class="warning-text">
-          Please log in to your Twenty instance to use the extension.
+          Add a Twenty API key above to use the extension. Generate one in
+          Twenty → Settings → Developers → API keys.
         </p>
         <button class="btn btn--primary" @click="openTwenty">
           Open Twenty →
@@ -292,7 +316,7 @@ function formatDate(timestamp: number): string {
         <h2 class="section__title">How to use</h2>
         <ol class="instructions">
           <li>Enter your Twenty CRM URL above</li>
-          <li>Log in to Twenty in your browser</li>
+          <li>Paste a Twenty API key (Settings → Developers)</li>
           <li>Visit any LinkedIn profile or company page</li>
           <li>Click the floating button to capture</li>
         </ol>

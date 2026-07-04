@@ -1,4 +1,4 @@
-import { TwentyApiClient, extractTokenFromCookie } from '../utils/twenty-api';
+import { TwentyApiClient } from '../utils/twenty-api';
 import { getSettings, saveSettings, addToRecentCaptures, getRecentCaptures } from '../utils/storage';
 import type { ExtensionMessage, ExtensionResponse, LinkedInProfileData, LinkedInCompanyData } from '../types';
 
@@ -14,70 +14,18 @@ async function getApiClient(): Promise<TwentyApiClient> {
     throw new Error('Twenty URL not configured');
   }
   
+  if (!settings.apiKey) {
+    throw new Error('No API key configured. Add a Twenty API key in the extension settings.');
+  }
+
   // Create new client if URL changed
   if (cachedTwentyUrl !== settings.twentyUrl || !apiClient) {
     apiClient = new TwentyApiClient(settings.twentyUrl);
     cachedTwentyUrl = settings.twentyUrl;
   }
-  
-  // Get fresh token from cookie
-  const token = await getAuthToken(settings.twentyUrl);
-  if (!token) {
-    throw new Error('No authentication token found. Please log in to Twenty CRM.');
-  }
-  
-  apiClient.setToken(token);
+
+  apiClient.setToken(settings.apiKey);
   return apiClient;
-}
-
-// Extract domain from URL for cookie access
-function extractDomain(url: string): string {
-  try {
-    const urlObj = new URL(url);
-    return urlObj.hostname;
-  } catch {
-    return url;
-  }
-}
-
-// Get auth token from Twenty's cookie
-async function getAuthToken(twentyUrl: string): Promise<string | null> {
-  try {
-    // Try to get the tokenPair cookie from Twenty domain
-    const cookie = await browser.cookies.get({
-      url: twentyUrl,
-      name: 'tokenPair',
-    });
-    
-    console.log('Cookie lookup for', twentyUrl, ':', cookie ? 'found' : 'not found');
-    
-    if (cookie?.value) {
-      const decodedValue = decodeURIComponent(cookie.value);
-      return extractTokenFromCookie(decodedValue);
-    }
-    
-    // Also try without www
-    const altUrl = twentyUrl.includes('://www.') 
-      ? twentyUrl.replace('://www.', '://') 
-      : twentyUrl.replace('://', '://www.');
-    
-    const altCookie = await browser.cookies.get({
-      url: altUrl,
-      name: 'tokenPair',
-    });
-    
-    console.log('Alt cookie lookup for', altUrl, ':', altCookie ? 'found' : 'not found');
-    
-    if (altCookie?.value) {
-      const decodedValue = decodeURIComponent(altCookie.value);
-      return extractTokenFromCookie(decodedValue);
-    }
-    
-    return null;
-  } catch (error) {
-    console.error('Error getting auth token:', error);
-    return null;
-  }
 }
 
 // Check if a person already exists (by LinkedIn URL or name)
@@ -228,8 +176,7 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
         if (!settings.twentyUrl) {
           return { success: false, error: 'Twenty URL not configured' };
         }
-        const token = await getAuthToken(settings.twentyUrl);
-        return { success: !!token, data: { hasToken: !!token } };
+        return { success: !!settings.apiKey, data: { hasToken: !!settings.apiKey } };
       }
       
       case 'CHECK_DUPLICATE': {
@@ -250,21 +197,21 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
       
       case 'GET_SETTINGS': {
         const settings = await getSettings();
-        const hasToken = settings.twentyUrl 
-          ? !!(await getAuthToken(settings.twentyUrl)) 
-          : false;
-        return { 
-          success: true, 
-          data: { ...settings, hasToken } 
+        const hasToken = !!settings.apiKey;
+        // Never expose the stored API key back to the UI; just report whether one is set
+        const { apiKey, ...safeSettings } = settings;
+        return {
+          success: true,
+          data: { ...safeSettings, hasToken }
         };
       }
-      
+
       case 'SAVE_SETTINGS': {
-        const newSettings = message.payload as { twentyUrl?: string };
-        console.log('Saving settings:', newSettings);
+        const newSettings = message.payload as { twentyUrl?: string; apiKey?: string };
+        console.log('Saving settings:', { ...newSettings, apiKey: newSettings.apiKey ? '***' : undefined });
         await saveSettings(newSettings);
-        // Clear cached client when URL changes
-        if (newSettings.twentyUrl) {
+        // Clear cached client when URL or key changes
+        if (newSettings.twentyUrl !== undefined || newSettings.apiKey !== undefined) {
           apiClient = null;
           cachedTwentyUrl = null;
         }

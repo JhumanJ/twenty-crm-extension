@@ -32,17 +32,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Create ZIP with WXT
-        run: npm run zip
+      - name: Type-check
+        run: npm run compile
+
+      - name: Build ZIPs (Chrome + Firefox)
+        run: |
+          npm run zip
+          npm run zip:firefox
 
       - name: List output files
         run: ls -la .output/
 
-      - name: Upload build artifact
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: twenty-crm-extension-chrome
-          path: .output/*-chrome.zip
+          name: twenty-crm-extension
+          path: .output/*.zip
 
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.version != ''
@@ -51,27 +56,24 @@ jobs:
           tag_name: ${{ github.event.inputs.version || github.ref_name }}
           name: Twenty CRM LinkedIn Extension ${{ github.event.inputs.version || github.ref_name }}
           body: |
-            ## 📥 Download & Install
+            ## Installation
 
-            1. Download the `.zip` file below
-            2. **Unzip** the file - creates a folder with `manifest.json` inside
-            3. Open Chrome → `chrome://extensions`
-            4. Enable **Developer mode** (top right)
-            5. Click **Load unpacked** → select the folder containing `manifest.json`
-            6. Click the extension icon and enter your Twenty CRM URL
+            1. Download the Chrome (`*-chrome.zip`) or Firefox (`*-firefox.zip`) build below.
+            2. Unzip it. The folder should contain `manifest.json` at its root.
+            3. Chrome: open `chrome://extensions`, enable Developer mode, click Load unpacked, and select the unzipped folder.
+            4. Click the extension icon and enter your Twenty URL and API key (Settings -> Developers in Twenty).
 
-            > ⚠️ Make sure you select the folder that has `manifest.json` directly inside, not a parent folder.
+            ## Features
 
-            ## ✨ Features
-
-            - Capture LinkedIn profiles & companies to Twenty CRM
-            - Auto-create companies when adding contacts
-            - Upload profile photos to Twenty storage
-            - Detect duplicates by LinkedIn URL or name
+            - Capture LinkedIn profiles and companies into Twenty CRM
+            - Auto-create the contact's current company when needed
+            - Duplicate detection by LinkedIn URL or name
             - Update existing records from LinkedIn
-            - Multi-language support (EN, FR, DE, ES)
+            - Search and link a profile to an existing record
 
-            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for full details.
-          files: .output/*-chrome.zip
+            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for details.
+          files: |
+            .output/*-chrome.zip
+            .output/*-firefox.zip
           draft: false
           prerelease: false

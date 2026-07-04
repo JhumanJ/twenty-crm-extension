@@ -6,6 +6,11 @@ export const twentyUrlStorage = storage.defineItem<string>('sync:twentyUrl', {
   fallback: '',
 });
 
+// API key is a secret — keep it in local storage only, never synced across devices
+export const apiKeyStorage = storage.defineItem<string>('local:apiKey', {
+  fallback: '',
+});
+
 export const lastCapturedStorage = storage.defineItem<Array<{
   linkedinUrl: string;
   name: string;
@@ -18,13 +23,19 @@ export const lastCapturedStorage = storage.defineItem<Array<{
 
 // Helper functions
 export async function getSettings(): Promise<ExtensionSettings> {
-  const twentyUrl = await twentyUrlStorage.getValue();
-  return { twentyUrl };
+  const [twentyUrl, apiKey] = await Promise.all([
+    twentyUrlStorage.getValue(),
+    apiKeyStorage.getValue(),
+  ]);
+  return { twentyUrl, apiKey };
 }
 
 export async function saveSettings(settings: Partial<ExtensionSettings>): Promise<void> {
   if (settings.twentyUrl !== undefined) {
     await twentyUrlStorage.setValue(settings.twentyUrl);
+  }
+  if (settings.apiKey !== undefined) {
+    await apiKeyStorage.setValue(settings.apiKey);
   }
 }
 

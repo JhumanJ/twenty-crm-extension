@@ -370,7 +370,7 @@ export default defineContentScript({
       render();
       
       // Check for existing record after a short delay
-      setTimeout(checkExisting, 1500);
+      setTimeout(checkExisting, 2500);
     }
     
     // Check for existing record
@@ -883,7 +883,7 @@ export default defineContentScript({
           showMenuDropdown = false;
           showSearchPanel = false;
           render();
-          setTimeout(checkExisting, 1500);
+          setTimeout(checkExisting, 2500);
         }
       }
     });

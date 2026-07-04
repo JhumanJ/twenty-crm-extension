@@ -216,6 +216,10 @@ export class TwentyApiClient {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${this.token}`,
+        // Some self-hosted Twenty instances are exposed through an ngrok tunnel
+        // during development; without this header ngrok's free tier serves an
+        // interstitial HTML warning page instead of proxying the request.
+        'ngrok-skip-browser-warning': 'true',
       },
       // Send cookies too, so deployments behind an authenticating reverse proxy
       // still pass the gateway. Harmless when no such proxy is present.

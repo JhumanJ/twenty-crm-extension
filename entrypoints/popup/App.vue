@@ -4,6 +4,8 @@ import type { ExtensionResponse } from '../../types';
 
 // State
 const twentyUrl = ref('');
+// Only holds a newly typed key; a saved key is never sent back to the popup
+const apiKey = ref('');
 const hasToken = ref(false);
 const isConnected = ref(false);
 const isLoading = ref(true);
@@ -31,7 +33,7 @@ const connectionStatus = computed(() => {
 const statusText = computed(() => {
   switch (connectionStatus.value) {
     case 'not-configured': return 'Not configured';
-    case 'no-session': return 'Not logged in';
+    case 'no-session': return 'No API key';
     case 'connected': return 'Connected';
     case 'disconnected': return 'Connection failed';
     default: return 'Unknown';
@@ -102,18 +104,26 @@ async function saveSettings() {
   }
   url = url.replace(/\/$/, ''); // Remove trailing slash
   twentyUrl.value = url;
-  
+
+  const key = apiKey.value.trim();
+  if (!key && !hasToken.value) {
+    error.value = 'Please enter an API key';
+    return;
+  }
+
   isSaving.value = true;
   error.value = null;
   success.value = null;
-  
+
   try {
     const response = await browser.runtime.sendMessage({
       type: 'SAVE_SETTINGS',
-      payload: { twentyUrl: url },
+      // Leaving the key field empty keeps the saved key
+      payload: { twentyUrl: url, apiKey: key || undefined },
     }) as ExtensionResponse;
-    
+
     if (response.success) {
+      apiKey.value = '';
       success.value = 'Settings saved!';
       // Reload to check token
       await loadSettings();
@@ -141,7 +151,7 @@ async function testConnection() {
     isConnected.value = response.success && response.data?.connected === true;
     
     if (!isConnected.value) {
-      error.value = 'Connection test failed. Check your URL and login.';
+      error.value = 'Connection test failed. Check your URL and API key.';
     }
   } catch (err) {
     console.error('Error testing connection:', err);
@@ -152,9 +162,9 @@ async function testConnection() {
   }
 }
 
-function openTwenty() {
+function openApiSettings() {
   if (twentyUrl.value) {
-    browser.tabs.create({ url: twentyUrl.value });
+    browser.tabs.create({ url: `${twentyUrl.value}/settings/api-webhooks` });
   }
 }
 
@@ -221,6 +231,20 @@ function formatDate(timestamp: number): string {
           <p class="hint">Your self-hosted Twenty instance URL</p>
         </div>
 
+        <div class="form-group">
+          <label class="label" for="apiKey">API key</label>
+          <input
+            id="apiKey"
+            v-model="apiKey"
+            type="password"
+            class="input"
+            autocomplete="off"
+            :placeholder="hasToken ? 'Saved (enter a new key to replace it)' : 'Paste your Twenty API key'"
+            @keyup.enter="saveSettings"
+          />
+          <p class="hint">Create one in Twenty under Settings → APIs &amp; Webhooks</p>
+        </div>
+
         <div class="button-group">
           <button 
             class="btn btn--primary" 
@@ -250,10 +274,10 @@ function formatDate(timestamp: number): string {
       <!-- Login Prompt -->
       <section v-if="isConfigured && !hasToken" class="section section--warning">
         <p class="warning-text">
-          Please log in to your Twenty instance to use the extension.
+          Add a Twenty API key to use the extension.
         </p>
-        <button class="btn btn--primary" @click="openTwenty">
-          Open Twenty →
+        <button class="btn btn--primary" @click="openApiSettings">
+          Create API key →
         </button>
       </section>
 
@@ -292,7 +316,7 @@ function formatDate(timestamp: number): string {
         <h2 class="section__title">How to use</h2>
         <ol class="instructions">
           <li>Enter your Twenty CRM URL above</li>
-          <li>Log in to Twenty in your browser</li>
+          <li>Create an API key in Twenty and paste it above</li>
           <li>Visit any LinkedIn profile or company page</li>
           <li>Click the floating button to capture</li>
         </ol>

@@ -22,52 +22,129 @@ export function getLinkedInIdentifier(url: string): string | null {
   return null;
 }
 
+// Canonical profile or company URL, without subpages such as /home/ or /details/...
+function getCanonicalUrl(pageType: 'person' | 'company'): string {
+  const identifier = getLinkedInIdentifier(window.location.href);
+  if (!identifier) return window.location.href.split('?')[0];
+  return `https://www.linkedin.com/${pageType === 'person' ? 'in' : 'company'}/${identifier}/`;
+}
+
+// LinkedIn's 2026 redesign uses hashed class names (e.g. "fa4lje"), so the
+// helpers below read the top card by structure and visible text instead.
+
+// The profile top card is the section holding the "Contact info" link
+function findPersonTopCard(): Element | null {
+  return (
+    document.querySelector('main a[href*="/overlay/contact-info/"]')?.closest('section') ||
+    document.querySelector('main section h2')?.closest('section') ||
+    null
+  );
+}
+
+// Visible text of an element's paragraphs, in page order, without "·" separators
+function getParagraphTexts(root: Element): string[] {
+  return Array.from(root.querySelectorAll('p'))
+    .map((p) => p.textContent?.trim().replace(/\s+/g, ' ') || '')
+    .filter((text) => text && text !== '·');
+}
+
+// Top card of the redesigned profile: name (h2), headline, current company
+// (first <strong>, as in "Acme + 2 more"), location (last paragraph before "Contact info")
+function scrapePersonTopCard(): {
+  name: string;
+  headline: string;
+  company: string;
+  location: string;
+  imageUrl: string;
+} | null {
+  const card = findPersonTopCard();
+  const nameElement = card?.querySelector('h2');
+  if (!card || !nameElement) return null;
+
+  const followsName = (el: Element) =>
+    !!(nameElement.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
+  const paragraphs = Array.from(card.querySelectorAll('p')).filter(followsName);
+  const headline = paragraphs.map((p) => p.textContent?.trim() || '').find(Boolean) || '';
+
+  let location = '';
+  const contactLink = card.querySelector('a[href*="/overlay/contact-info/"]');
+  if (contactLink) {
+    // Skip the paragraph that wraps the "Contact info" link itself
+    const beforeContact = paragraphs.filter(
+      (p) =>
+        !p.contains(contactLink) &&
+        !!(p.compareDocumentPosition(contactLink) & Node.DOCUMENT_POSITION_FOLLOWING)
+    );
+    location = beforeContact
+      .map((p) => p.textContent?.trim() || '')
+      .filter((text) => text && text !== '·' && text !== headline)
+      .pop() || '';
+  }
+
+  const company = card.querySelector('strong')?.textContent?.trim() || '';
+
+  const image = Array.from(card.querySelectorAll('img')).find((img) =>
+    img.src.includes('profile-displayphoto')
+  );
+
+  return {
+    name: nameElement.textContent?.trim() || '',
+    headline,
+    company,
+    location,
+    imageUrl: image?.src || '',
+  };
+}
+
 // Scrape person profile data from LinkedIn page
 export function scrapePersonProfile(): LinkedInProfileData | null {
   try {
-    const linkedinUrl = window.location.href.split('?')[0];
-    
+    const linkedinUrl = getCanonicalUrl('person');
+    const topCard = scrapePersonTopCard();
+
     // Get name - LinkedIn uses h1 for the profile name with various class combinations
     // Try multiple selectors as LinkedIn frequently changes their DOM
-    const nameElement = 
+    const nameElement =
       document.querySelector('h1.text-heading-xlarge') ||  // Old format
       document.querySelector('h1.inline.t-24') ||          // New format (2024+)
       document.querySelector('h1.t-24.v-align-middle') ||  // Another variant
       document.querySelector('.pv-top-card h1') ||         // Fallback: h1 in top card
       document.querySelector('h1[class*="break-words"]');  // Generic fallback
     
-    if (!nameElement) {
+    const fullName = nameElement?.textContent?.trim() || topCard?.name || '';
+    if (!fullName) {
       console.warn('Could not find name element - tried multiple selectors');
       return null;
     }
-    
-    const fullName = nameElement.textContent?.trim() || '';
+
     console.log('Scraped name:', fullName);
     const nameParts = parseFullName(fullName);
-    
+
     // Get headline/title - div with text-body-medium class that has job title
     // Use data-generated-suggestion-target attribute as it's more reliable
-    const headlineElement = 
+    const headlineElement =
       document.querySelector('div[data-generated-suggestion-target]') ||
       document.querySelector('div.text-body-medium.break-words');
-    const headline = headlineElement?.textContent?.trim() || '';
+    const headline = headlineElement?.textContent?.trim() || topCard?.headline || '';
     console.log('Scraped headline:', headline);
-    
+
     // Get current company info
     const companyData = scrapeCurrentCompanyFromProfile();
-    const currentCompany = companyData?.name || extractCompanyFromHeadline(headline);
+    const currentCompany =
+      companyData?.name || topCard?.company || extractCompanyFromHeadline(headline);
     console.log('Scraped company data:', companyData);
     console.log('Current company:', currentCompany);
-    
+
     // Get profile image - try to get high quality version
-    const profileImageUrl = scrapeProfileImage();
-    
+    // Top card first: the old fallbacks can match photos in the "More profiles" sidebar
+    const profileImageUrl = topCard?.imageUrl || scrapeProfileImage();
+
     // Get location - span with location info
-    const locationElement = 
+    const locationElement =
       document.querySelector('span.text-body-small.inline.t-black--light.break-words') ||
       document.querySelector('.text-body-small.inline.t-black--light.break-words') ||
       document.querySelector('.pv-top-card--list-bullet li:last-child');
-    const location = locationElement?.textContent?.trim() || '';
+    const location = locationElement?.textContent?.trim() || topCard?.location || '';
     console.log('Scraped location:', location);
     
     const result = {
@@ -191,25 +268,31 @@ function scrapeCurrentCompanyFromProfile(): { name: string; linkedinUrl?: string
 // Scrape company page data from LinkedIn
 export function scrapeCompanyPage(): LinkedInCompanyData | null {
   try {
-    const linkedinUrl = window.location.href.split('?')[0];
+    const linkedinUrl = getCanonicalUrl('company');
     
     // Company name
-    const nameElement = 
+    // Redesigned page: the first h2 in main, in a card whose paragraphs read
+    // "Industry · Location · 29M followers · 10K+ employees"
+    const topCardHeading = document.querySelector('main h2');
+    const nameElement =
       document.querySelector('h1.org-top-card-summary__title') ||
-      document.querySelector('.org-top-card-summary-info-list__info-item') ||
-      document.querySelector('h1[title]');
-    
+      document.querySelector('h1[title]') ||
+      topCardHeading;
+
     if (!nameElement) {
       console.warn('Could not find company name element');
       return null;
     }
-    
+
     const name = nameElement.textContent?.trim() || '';
-    
+
+    const topCard = nameElement === topCardHeading ? findCompanyTopCard(topCardHeading) : null;
+    const topCardTexts = topCard ? getParagraphTexts(topCard) : [];
+
     // Industry
     const industryElement = document.querySelector('.org-top-card-summary-info-list__info-item');
-    const industry = industryElement?.textContent?.trim() || '';
-    
+    const industry = industryElement?.textContent?.trim() || topCardTexts[0] || '';
+
     // Employee count
     const employeeElements = document.querySelectorAll('.org-top-card-summary-info-list__info-item');
     let employeeCount = '';
@@ -219,6 +302,9 @@ export function scrapeCompanyPage(): LinkedInCompanyData | null {
         employeeCount = text.trim();
       }
     });
+    if (!employeeCount) {
+      employeeCount = topCardTexts.find((text) => /employees?\b/i.test(text)) || '';
+    }
     
     // Website - look in the about section or sidebar
     const websiteElement = 
@@ -228,7 +314,10 @@ export function scrapeCompanyPage(): LinkedInCompanyData | null {
     
     // Logo
     const logoElement = document.querySelector('.org-top-card-primary-content__logo');
-    const logoUrl = logoElement?.getAttribute('src') || '';
+    const logoUrl =
+      logoElement?.getAttribute('src') ||
+      topCard?.querySelector<HTMLImageElement>('img[src*="company-logo"]')?.src ||
+      '';
     
     // Description/tagline
     const descElement = document.querySelector('.org-top-card-summary__tagline');
@@ -248,6 +337,19 @@ export function scrapeCompanyPage(): LinkedInCompanyData | null {
     console.error('Error scraping company page:', error);
     return null;
   }
+}
+
+// The redesigned company top card: the closest ancestor of the name that also
+// holds the info paragraphs (industry, location, followers, employees)
+function findCompanyTopCard(heading: Element): Element | null {
+  let el = heading.parentElement;
+  while (el && el.tagName !== 'MAIN') {
+    if (getParagraphTexts(el).some((text) => /followers?\b|employees?\b/i.test(text))) {
+      return el;
+    }
+    el = el.parentElement;
+  }
+  return null;
 }
 
 // Main scraper function that detects page type and scrapes accordingly

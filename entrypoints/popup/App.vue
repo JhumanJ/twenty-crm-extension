@@ -164,7 +164,7 @@ async function testConnection() {
 
 function openApiSettings() {
   if (twentyUrl.value) {
-    browser.tabs.create({ url: `${twentyUrl.value}/settings/api-webhooks` });
+    browser.tabs.create({ url: `${twentyUrl.value}/settings/developers` });
   }
 }
 
@@ -242,7 +242,7 @@ function formatDate(timestamp: number): string {
             :placeholder="hasToken ? 'Saved (enter a new key to replace it)' : 'Paste your Twenty API key'"
             @keyup.enter="saveSettings"
           />
-          <p class="hint">Create one in Twenty under Settings → APIs &amp; Webhooks</p>
+          <p class="hint">Create one in Twenty under Settings → Developers</p>
         </div>
 
         <div class="button-group">
@@ -318,7 +318,7 @@ function formatDate(timestamp: number): string {
           <li>Enter your Twenty CRM URL above</li>
           <li>Create an API key in Twenty and paste it above</li>
           <li>Visit any LinkedIn profile or company page</li>
-          <li>Click the floating button to capture</li>
+          <li>Click Add to Twenty next to LinkedIn's More button</li>
         </ol>
       </section>
     </main>

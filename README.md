@@ -14,7 +14,7 @@ A Chrome extension to capture LinkedIn profiles and companies directly into your
 4. Open Chrome → `chrome://extensions`
 5. Enable **Developer mode** (toggle top right)
 6. Click **Load unpacked** → select the **unzipped folder** (the one containing `manifest.json`)
-7. In Twenty, go to **Settings → APIs & Webhooks** and create an API key
+7. In Twenty, go to **Settings → Developers** and create an API key
 8. Click the extension icon, enter your Twenty CRM URL and paste the API key, then click **Save**
 
 > **Note**: The extension authenticates with an API key, not your browser login. Twenty 2.x keeps its login session in an httpOnly cookie that extensions cannot use. Anyone using this browser profile can use the key, so give it a role with only the access the extension needs (read and write People and Companies, upload files).
@@ -122,7 +122,7 @@ GitHub Actions will automatically build and create a release with the ZIP file.
 
 - Chrome or Chromium-based browser
 - Self-hosted Twenty CRM instance (tested with 2.54)
-- A Twenty API key (Settings → APIs & Webhooks)
+- A Twenty API key (Settings → Developers)
 
 ---
 

@@ -341,6 +341,12 @@ export class TwentyApiClient {
     });
 
     if (!response.ok) {
+      // Some setups answer GraphQL errors with a 4xx status; return those as
+      // GraphQL errors so callers can read them (and the create fallback runs)
+      const body = await response.json().catch(() => null);
+      if (body?.errors?.length) {
+        return body;
+      }
       throw new Error(`HTTP error: ${response.status}`);
     }
 

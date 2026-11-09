@@ -39,8 +39,6 @@ export type TwentyPerson = {
   };
   linkedinLink?: TwentyLinks;
   jobTitle?: string;
-  avatarUrl?: string;
-  city?: string;
   company?: {
     id: string;
     name: string;
@@ -52,19 +50,7 @@ export type TwentyCompany = {
   name: string;
   linkedinLink?: TwentyLinks;
   domainName?: TwentyLinks;
-  employees?: number;
   idealCustomerProfile?: boolean;
-};
-
-export type TwentyTokenPair = {
-  accessOrWorkspaceAgnosticToken: {
-    token: string;
-    expiresAt: string;
-  };
-  refreshToken: {
-    token: string;
-    expiresAt: string;
-  };
 };
 
 // Extension State Types
@@ -114,6 +100,7 @@ export type ExtensionResponse<T = unknown> = {
 // Settings
 export type ExtensionSettings = {
   twentyUrl: string;
+  apiKey: string;
 };
 
 // GraphQL Response Types
@@ -139,13 +126,5 @@ export type CompaniesQueryResult = {
       node: TwentyCompany;
     }>;
   };
-};
-
-export type CreatePersonResult = {
-  createPerson: TwentyPerson;
-};
-
-export type CreateCompanyResult = {
-  createCompany: TwentyCompany;
 };
 

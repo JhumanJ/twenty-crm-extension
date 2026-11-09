@@ -14,9 +14,10 @@ A Chrome extension to capture LinkedIn profiles and companies directly into your
 4. Open Chrome → `chrome://extensions`
 5. Enable **Developer mode** (toggle top right)
 6. Click **Load unpacked** → select the **unzipped folder** (the one containing `manifest.json`)
-7. Click the extension icon and enter your Twenty CRM URL
+7. In Twenty, go to **Settings → Developers** and create an API key
+8. Click the extension icon, enter your Twenty CRM URL and paste the API key, then click **Save**
 
-> **Note**: You must be logged into your Twenty CRM in the same browser for the extension to work.
+> **Note**: The extension authenticates with an API key, not your browser login. Twenty 2.x keeps its login session in an httpOnly cookie that extensions cannot use. Anyone using this browser profile can use the key, so give it a role with only the access the extension needs (read and write People and Companies, upload files).
 >
 > **Tip**: After unzipping, verify the folder contains `manifest.json` at the root level, not inside a subfolder.
 
@@ -27,11 +28,10 @@ A Chrome extension to capture LinkedIn profiles and companies directly into your
 | Feature                    | Description                                                |
 | -------------------------- | ---------------------------------------------------------- |
 | 🔗 **LinkedIn Capture**    | One-click capture of LinkedIn profiles to your CRM         |
+| ➕ **Inline Button**       | "Add to Twenty" next to LinkedIn's "More" button          |
 | 🏢 **Company Auto-Create** | Automatically creates company records when adding contacts |
 | 📸 **Photo Upload**        | Uploads LinkedIn profile photos directly to Twenty storage |
 | 🔍 **Duplicate Detection** | Checks if contact/company exists by LinkedIn URL or name   |
-| 🔄 **Update Existing**     | Refresh CRM records with latest LinkedIn data              |
-| 🔎 **Manual Linking**      | Search and link LinkedIn profiles to existing CRM contacts |
 | 🌍 **Multi-language**      | Extracts company names in EN, FR, DE, ES headlines         |
 
 ---
@@ -41,16 +41,12 @@ A Chrome extension to capture LinkedIn profiles and companies directly into your
 ### Capturing a LinkedIn Profile
 
 1. Visit any LinkedIn profile (`linkedin.com/in/username`)
-2. A button appears in the **bottom-left corner**:
+2. An **Add to Twenty** button appears next to LinkedIn's **More** button:
 
    | Button State       | Meaning                               |
    | ------------------ | ------------------------------------- |
    | **Add to Twenty**  | Profile not in CRM - click to add     |
    | **Open in Twenty** | Profile exists - click to view in CRM |
-
-3. Click `•••` for more options:
-   - **Link to existing contact** - Search and link to existing record
-   - **Update from LinkedIn** - Refresh CRM with current LinkedIn data
 
 ### Capturing a Company
 
@@ -125,8 +121,8 @@ GitHub Actions will automatically build and create a release with the ZIP file.
 ## 🔧 Requirements
 
 - Chrome or Chromium-based browser
-- Self-hosted Twenty CRM instance
-- Logged into Twenty CRM in the same browser
+- Self-hosted Twenty CRM instance (tested with 2.54)
+- A Twenty API key (Settings → Developers)
 
 ---
 
@@ -134,7 +130,7 @@ GitHub Actions will automatically build and create a release with the ZIP file.
 
 | Issue                     | Solution                                                             |
 | ------------------------- | -------------------------------------------------------------------- |
-| "Failed to save settings" | Check your Twenty URL is correct and you're logged in                |
+| "Connection test failed"  | Check your Twenty URL and that the API key is valid and not expired  |
 | Button not appearing      | Refresh the LinkedIn page, check extension is enabled                |
 | Profile photo not showing | Check Twenty's file storage is configured                            |
 | Company not created       | Headline may not have recognizable pattern (`at/chez/@/bei` Company) |
